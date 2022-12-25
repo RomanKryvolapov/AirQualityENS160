@@ -4,145 +4,196 @@
 #include <DFRobot_ENS160.h>
 #include <AHTxx.h>
 
-#define I2C_COMMUNICATION
+const uint8_t LCD_I2C_ADDRESS = 0x3F;
+const uint8_t LCD_COLUMNS = 16;
+const uint8_t LCD_LINES = 2;
+const uint8_t ENS160_I2C_ADDRESS = 0x53;
+const uint8_t AHT20_I2C_ADDRESS = 0x38;
 
-#ifdef  I2C_COMMUNICATION
-DFRobot_ENS160_I2C ENS160(&Wire, 0x53);
-#else
-#endif
+const uint16_t PROGRAM_START_DELAY = 1000;
+const uint16_t PROGRAM_ERROR_DELAY = 1000;
+const uint8_t PROGRAM_UPDATE_SENSORS_DELAY = 100;
+const uint8_t PROGRAM_UPDATE_DISPLAY_DELAY = 100;
+const float DEFAULT_AMBIENT_TEMPERATURE = 20.0;
+const float DEFAULT_AMBIENT_HUMIDITY = 50.0;
+const String SPACE_LINE = "      ";
+const String SMALL_SPACE_LINE = "  ";
 
-LiquidCrystal_I2C lcd(0x3F, 16, 2);
-AHTxx aht20(AHTXX_ADDRESS_X38, AHT2x_SENSOR);
+LiquidCrystal_I2C LCD(LCD_I2C_ADDRESS, LCD_COLUMNS, LCD_LINES);
+AHTxx AHT20(AHT20_I2C_ADDRESS, AHT2x_SENSOR);
+DFRobot_ENS160_I2C ENS160(&Wire, ENS160_I2C_ADDRESS);
+TaskHandle_t TaskGetSensorData;
+TaskHandle_t TaskUpdateDisplay;
 
-uint16_t TVOC_new = 0;
-uint16_t TVOC_old = 0;
-uint16_t CO2_new = 0;
-uint16_t CO2_old = 0;
-uint16_t AQI_new = 0;
-uint16_t AQI_old = 0;
-float humidity_new = 0;
-float humidity_old = 0;
-float temperature_new = 0;
-float temperature_old = 0;
-const uint32_t program_start_delay = 1000;
-const uint32_t program_error_delay = 1000;
-const uint32_t program_delay = 1000;
-const String space_line = "      ";
-const String small_space_line = "  ";
+uint16_t TVOC_index_new = 0;
+uint16_t TVOC_index_old = 0;
+
+uint16_t CO2_index_new = 0;
+uint16_t CO2_index_old = 0;
+
+uint8_t air_quality_index_new = 0;
+uint8_t air_quality_index_old = 0;
+
+uint8_t humidity_new = 0;
+uint8_t humidity_old = 0;
+
+uint8_t temperature_new = 0;
+uint8_t temperature_old = 0;
 
 void setupLCD() {
-    lcd.init();
-    lcd.backlight();
+    LCD.init();
+    LCD.backlight();
+    LCD.clear();
+    LCD.setCursor(0, 0);
+    LCD.print("    Made by");
+    LCD.setCursor(0, 1);
+    LCD.print("Roman Kryvolapov");
+}
+
+void setupLCDConst() {
+    LCD.clear();
+    LCD.setCursor(0, 0);
+    LCD.print("T ");
+    LCD.setCursor(8, 0);
+    LCD.print("C ");
+    LCD.setCursor(0, 1);
+    LCD.print("A  ");
+    LCD.setCursor(5, 1);
+    LCD.print("T ");
+    LCD.setCursor(12, 1);
+    LCD.print("H ");
+}
+
+void displayInformation() {
+    if (TVOC_index_new != TVOC_index_old) {
+        LCD.setCursor(2, 0);
+        LCD.print(SPACE_LINE);
+        LCD.setCursor(2, 0);
+        LCD.print(TVOC_index_new);
+        TVOC_index_old = TVOC_index_new;
+    }
+    if (CO2_index_new != CO2_index_old) {
+        LCD.setCursor(10, 0);
+        LCD.print(SPACE_LINE);
+        LCD.setCursor(10, 0);
+        LCD.print(CO2_index_new);
+        CO2_index_old = CO2_index_new;
+    }
+    if (air_quality_index_new != air_quality_index_old) {
+        LCD.setCursor(2, 1);
+        LCD.print(SMALL_SPACE_LINE);
+        LCD.setCursor(2, 1);
+        LCD.print(air_quality_index_new);
+        air_quality_index_old = air_quality_index_new;
+    }
+    if (temperature_new != temperature_old) {
+        LCD.setCursor(7, 1);
+        LCD.print(temperature_new);
+        temperature_old = temperature_new;
+    }
+    if (humidity_new != humidity_old) {
+        LCD.setCursor(14, 1);
+        LCD.print(humidity_new);
+        humidity_old = humidity_new;
+    }
 }
 
 void setupENS160() {
     while (ENS160.begin() != NO_ERR) {
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("ENS160 not started");
-        delay(program_error_delay);
+        LCD.clear();
+        LCD.setCursor(0, 1);
+        LCD.print("ENS160 not started");
+        delay(PROGRAM_ERROR_DELAY);
     }
     ENS160.setPWRMode(ENS160_STANDARD_MODE);
-    ENS160.setTempAndHum(20.0, 50.0);
+    ENS160.setTempAndHum(DEFAULT_AMBIENT_TEMPERATURE, DEFAULT_AMBIENT_HUMIDITY);
 }
 
 void setupATH20() {
-    while (!aht20.begin()) {
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("AHT20 not started");
-        delay(program_error_delay);
+    while (!AHT20.begin()) {
+        LCD.clear();
+        LCD.setCursor(0, 0);
+        LCD.print("AHT20 not started");
+        delay(PROGRAM_ERROR_DELAY);
     }
 }
 
 void checkATH20() {
-    temperature_new = aht20.readTemperature();
-    humidity_new = aht20.readHumidity();
+    temperature_new = AHT20.readTemperature();
+    humidity_new = AHT20.readHumidity();
     if (temperature_new == AHTXX_ERROR || humidity_new == AHTXX_ERROR) {
-        lcd.clear();
+        LCD.clear();
         if (temperature_new == AHTXX_ERROR && humidity_new == AHTXX_ERROR) {
-            lcd.setCursor(0, 0);
-            lcd.print("AHT20 temp error");
-            lcd.setCursor(0, 1);
-            lcd.print("AHT20 hum error");
+            LCD.setCursor(0, 0);
+            LCD.print("AHT20 temp error");
+            LCD.setCursor(0, 1);
+            LCD.print("AHT20 hum error");
         } else if (humidity_new == AHTXX_ERROR) {
-            lcd.setCursor(0, 0);
-            lcd.print("AHT20 hum error");
+            LCD.setCursor(0, 0);
+            LCD.print("AHT20 hum error");
         } else if (temperature_new == AHTXX_ERROR) {
-            lcd.setCursor(0, 0);
-            lcd.print("AHT20 temp error");
+            LCD.setCursor(0, 0);
+            LCD.print("AHT20 temp error");
         }
-        aht20.softReset();
-        delay(program_error_delay);
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("reset AHT20");
-        delay(program_error_delay);
+        AHT20.softReset();
+        delay(PROGRAM_ERROR_DELAY);
+        LCD.clear();
+        LCD.setCursor(0, 0);
+        LCD.print("reset AHT20");
+        delay(PROGRAM_ERROR_DELAY);
     } else {
         ENS160.setTempAndHum(temperature_new, humidity_new);
     }
 }
 
 void checkENS160() {
-    TVOC_new = ENS160.getTVOC();
-    CO2_new = ENS160.getECO2();
-    AQI_new = ENS160.getAQI();
+    TVOC_index_new = ENS160.getTVOC();
+    CO2_index_new = ENS160.getECO2();
+    air_quality_index_new = ENS160.getAQI();
 }
 
-void displayInformation() {
-    if (TVOC_new != TVOC_old) {
-        lcd.setCursor(0, 0);
-        lcd.print(space_line);
-        lcd.setCursor(0, 0);
-        lcd.print(TVOC_new);
-        TVOC_old = TVOC_new;
-    }
-    if (CO2_new != CO2_old) {
-        lcd.setCursor(8, 0);
-        lcd.print(space_line);
-        lcd.setCursor(8, 0);
-        lcd.print(CO2_new);
-        CO2_old = CO2_new;
-    }
-    if (AQI_new != AQI_old) {
-        lcd.setCursor(0, 1);
-        lcd.print(small_space_line);
-        lcd.setCursor(0, 1);
-        lcd.print(AQI_new);
-        AQI_old = AQI_new;
-    }
-    if (temperature_new != temperature_old) {
-        lcd.setCursor(3, 1);
-        lcd.print(temperature_new);
-        temperature_old = temperature_new;
-    }
-    if (humidity_new != humidity_old) {
-        lcd.setCursor(11, 1);
-        lcd.print(humidity_new);
-        humidity_old = humidity_new;
+void taskGetSensorData(void *pvParameters) {
+    while (true) {
+        checkENS160();
+        checkATH20();
+        delay(PROGRAM_UPDATE_SENSORS_DELAY);
     }
 }
 
-void showAuthor() {
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("    Made by");
-    lcd.setCursor(0, 1);
-    lcd.print("Roman Kryvolapov");
-    lcd.clear();
+void taskUpdateDisplay(void *pvParameters) {
+    while (true) {
+        displayInformation();
+        delay(PROGRAM_UPDATE_DISPLAY_DELAY);
+    }
+}
+
+void setupTasksForESP32Cores() {
+    xTaskCreatePinnedToCore(
+            taskGetSensorData,
+            "taskGetSensorData",
+            50000,
+            NULL,
+            1,
+            &TaskGetSensorData,
+            0);
+    xTaskCreatePinnedToCore(
+            taskUpdateDisplay,
+            "taskUpdateDisplay",
+            50000,
+            NULL,
+            1,
+            &TaskUpdateDisplay,
+            1);
 }
 
 void setup() {
     setupLCD();
-    showAuthor();
     setupENS160();
     setupATH20();
-    delay(program_start_delay);
+    delay(PROGRAM_START_DELAY);
+    setupLCDConst();
+    setupTasksForESP32Cores();
 }
 
 void loop() {
-    checkENS160();
-    checkATH20();
-    displayInformation();
-    delay(program_delay);
 }
