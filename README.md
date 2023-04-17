@@ -8,6 +8,8 @@
 <p>SDA ENS160 -> 21 pin ESP32</p>
 <p>SCL ENS160 -> 22 pin ESP32</p>
 
+https://github.com/RomanKryvolapov/AirQualityENS160/blob/master/ENS160_Datasheet.pdf
+
 ![Image 1!](https://github.com/RomanKryvolapov/AirQualityENS160/blob/master/img1.jpg "Image 1")
 
 ![Image 2!](https://github.com/RomanKryvolapov/AirQualityENS160/blob/master/img2.jpg "Image 2")
